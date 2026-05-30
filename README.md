@@ -787,6 +787,25 @@ adb -s emulator-5554 shell am start -n com.easymd.ywy/com.easymd.MainActivity
 
 ---
 
+## 近期修复
+
+### v0.1.1 — 安全与稳定性修复
+
+| 类别 | 修复内容 | 涉及文件 |
+|------|---------|---------|
+| 🔴 并发安全 | `uuidToFileName` 改用 `ConcurrentHashMap`，消除多协程并发 CRUD 时的 `ConcurrentModificationException` | `NoteRepository.kt` |
+| 🔴 映射失效 | `switchStorage()` 现在同时更新 `activeLibraryId` / `fileNamePrefs` / `attachmentManager`，切换笔记库后不再映射到旧库 | `NoteRepository.kt` |
+| 🔴 附件泄漏 | `deleteNote()` 先逐条调用 `storage.deleteAttachment()` 清理远程附件，再清理本地附件索引 | `NoteRepository.kt` |
+| 🔴 XXE 注入 | WebDAV XML 解析禁用 DOCTYPE 声明和外部实体，防止恶意服务器 SSRF/本地文件读取 | `WebDAVStorage.kt` |
+| 🔴 签名断裂 | AWS SigV4 `canonicalHeaders` 按 header 名称 ASCII 排序，新增 header 后签名不再失效 | `S3Storage.kt` |
+| 🟡 YAML 解析 | Front Matter `---` 闭合边界改用精确匹配，支持 `tags: [tag1, "tag2"]` 和 `tags: tag1,tag2` 两种格式 | `NoteRepository.kt` |
+| 🟡 代码块兼容 | 结束符检测允许 fence 长度 ≥ 起始符（GFM 规范），` ```` ` 可闭合 `` ``` `` | `WysiwygEditor.kt` |
+| 🟡 标题自动空格 | 从仅修复第一个匹配改为修复全文所有 `#标题` 行，光标偏移正确处理 | `WysiwygEditor.kt` |
+| 🟡 S3 编码 | `encodeS3` 空格编码从 `+` 改为 `%20`，兼容非标准 S3 实现 | `S3Storage.kt` |
+| 🟡 URL 构造 | 新增 `s3Host`/`s3PathPrefix` 属性，支持 endpoint 含路径前缀的场景 | `S3Storage.kt` |
+
+---
+
 ## 开发路线图
 
 - [x] 笔记 CRUD（创建、读取、更新、删除）

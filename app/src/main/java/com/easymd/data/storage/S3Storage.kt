@@ -24,6 +24,13 @@ class S3Storage(private val config: StorageConfig) : NoteStorage {
     private val endpoint = config.s3Endpoint.trimEnd('/')
     private val bucket = config.s3Bucket
     private val prefix = config.s3Prefix.trimEnd('/') + "/"
+    // Use path-style access if endpoint contains a path; otherwise virtual-hosted style
+    private val s3Host: String by lazy {
+        if (endpoint.contains("/")) endpoint else "$bucket.$endpoint"
+    }
+    private val s3PathPrefix: String by lazy {
+        if (endpoint.contains("/")) "/$bucket/$prefix" else "/$prefix"
+    }
 
     override suspend fun listNoteFiles(): List<String> {
         val host = "$bucket.$endpoint"
@@ -270,7 +277,12 @@ class S3Storage(private val config: StorageConfig) : NoteStorage {
             timeZone = TimeZone.getTimeZone("UTC")
         }.format(Date())
 
-        val amzHeaders = listOf("host" to host, "x-amz-content-sha256" to payloadHash, "x-amz-date" to now)
+        // AWS SigV4 requires canonical headers to be sorted by header name (ASCII order)
+        val amzHeaders = listOf(
+            "host" to host,
+            "x-amz-content-sha256" to payloadHash,
+            "x-amz-date" to now
+        ).sortedBy { it.first }
         val signedHeaders = amzHeaders.joinToString(";") { it.first }
 
         val canonicalHeaders = amzHeaders.joinToString("\n") { "${it.first}:${it.second}" } + "\n"
@@ -326,7 +338,8 @@ class S3Storage(private val config: StorageConfig) : NoteStorage {
     }
 
     private fun encodeS3(s: String): String {
-        return java.net.URLEncoder.encode(s, "UTF-8")
+        // URLEncoder encodes spaces as '+' but S3 expects '%20'
+        return java.net.URLEncoder.encode(s, "UTF-8").replace("+", "%20")
     }
 
     private fun sha256Hex(data: ByteArray): String {

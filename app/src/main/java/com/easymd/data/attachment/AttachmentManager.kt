@@ -214,10 +214,13 @@ class AttachmentManager(private val context: Context, libraryId: String = "") {
         val entries = getEntriesForNote(oldNoteId)
         if (entries.isEmpty()) return contents
 
+        // Update attachment entry ownership
         entries.forEach { entry ->
             saveEntry(entry.copy(noteId = newNoteId))
         }
 
+        // Update content references if the storedName changed (e.g., due to migration)
+        // For simple noteId reassignment, paths stay the same, so content is unchanged
         return contents
     }
 

@@ -9,14 +9,14 @@ import com.easymd.data.storage.NoteStorage
 import com.easymd.data.storage.StorageConfig
 import com.easymd.data.storage.StorageManager
 import java.util.Date
+import java.util.concurrent.ConcurrentHashMap
 
 class NoteRepository(private val context: Context, private val storageConfig: StorageConfig? = null) {
 
     private val storageManager = StorageManager(context)
-    private val activeLibraryId = storageManager.getActiveLibraryId()
-    private val attachmentManager = AttachmentManager(context, activeLibraryId)
-
-    private val fileNamePrefs: SharedPreferences =
+    private var activeLibraryId = storageManager.getActiveLibraryId()
+    private var attachmentManager = AttachmentManager(context, activeLibraryId)
+    private var fileNamePrefs: SharedPreferences =
         context.getSharedPreferences("filename_map${if (activeLibraryId.isNotBlank()) "_$activeLibraryId" else ""}", Context.MODE_PRIVATE)
 
     private var storage: NoteStorage = if (storageConfig != null) {
@@ -25,11 +25,17 @@ class NoteRepository(private val context: Context, private val storageConfig: St
         storageManager.createStorage(context, storageManager.getActiveLibrary().storageConfig)
     }
 
-    private val uuidToFileName = mutableMapOf<String, String>()
+    private val uuidToFileName = ConcurrentHashMap<String, String>()
 
     fun switchStorage(config: StorageConfig) {
         storage = storageManager.createStorage(context, config)
         uuidToFileName.clear()
+        activeLibraryId = storageManager.getActiveLibraryId()
+        fileNamePrefs = context.getSharedPreferences(
+            "filename_map${if (activeLibraryId.isNotBlank()) "_$activeLibraryId" else ""}",
+            Context.MODE_PRIVATE
+        )
+        attachmentManager = AttachmentManager(context, activeLibraryId)
     }
 
     fun getAttachmentManager(): AttachmentManager = attachmentManager
@@ -98,6 +104,12 @@ class NoteRepository(private val context: Context, private val storageConfig: St
     }
 
     suspend fun deleteNote(uuid: String) {
+        // Clean remote attachments first (for WebDAV/S3)
+        val entries = attachmentManager.getEntriesForNote(uuid)
+        entries.forEach { entry ->
+            storage.deleteAttachment(entry.storedName)
+        }
+        // Clean local attachments and index
         attachmentManager.deleteAttachmentsForNote(uuid)
         val fileName = resolveFileName(uuid)
         if (fileName.isNotBlank()) {
@@ -218,6 +230,20 @@ class NoteRepository(private val context: Context, private val storageConfig: St
         return if (sanitized.isBlank()) "未命名" else sanitized.take(200)
     }
 
+    private fun parseYamlTags(value: String): List<String> {
+        val trimmed = value.trim()
+        return if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+            // YAML inline list format: [tag1, tag2]
+            trimmed.removeSurrounding("[", "]")
+                .split(",")
+                .map { it.trim().trim('"').trim('\'') }
+                .filter { it.isNotBlank() }
+        } else {
+            // Comma-separated format: tag1,tag2
+            trimmed.split(",").map { it.trim() }.filter { it.isNotBlank() }
+        }
+    }
+
     private fun saveFileNameMapping(uuid: String, fileName: String) {
         fileNamePrefs.edit().putString(uuid, fileName).apply()
     }
@@ -237,7 +263,8 @@ class NoteRepository(private val context: Context, private val storageConfig: St
         var markdownContent = ""
 
         if (lines.isNotEmpty() && lines[0] == "---") {
-            val endIndex = lines.subList(1, lines.size).indexOf("---").let { if (it >= 0) it + 1 else -1 }
+            // Find the closing --- by exact match (not just indexOf, which would match --- inside content)
+            val endIndex = lines.subList(1, lines.size).indexOfFirst { it.trim() == "---" }.let { if (it >= 0) it + 1 else -1 }
             if (endIndex != -1) {
                 val headerLines = lines.subList(1, endIndex)
                 headerLines.forEach { line ->
@@ -250,7 +277,9 @@ class NoteRepository(private val context: Context, private val storageConfig: St
                             "title" -> title = value
                             "createdAt" -> createdAt = Date(value.toLongOrNull() ?: System.currentTimeMillis())
                             "updatedAt" -> updatedAt = Date(value.toLongOrNull() ?: System.currentTimeMillis())
-                            "tags" -> tags = value.split(",").filter { it.isNotBlank() }
+                            "tags" -> {
+                                tags = parseYamlTags(value)
+                            }
                         }
                     }
                 }

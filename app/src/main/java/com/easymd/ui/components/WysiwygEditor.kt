@@ -164,7 +164,10 @@ fun parseBlocks(text: String): List<String> {
             codeBlockFence = trimmed.takeWhile { it == '`' }
         } else if (inCodeBlock) {
             current.appendLine(line)
-            if (trimmed.startsWith(codeBlockFence) && trimmed.count { it == '`' } >= codeBlockFence.length && trimmed.trimEnd() == codeBlockFence) {
+            // GFM: closing fence can be >= opening fence length; may have trailing whitespace only (no text)
+            val fenceChars = trimmed.trimStart().takeWhile { it == '`' }
+            val afterFence = trimmed.trimStart().dropWhile { it == '`' }
+            if (fenceChars.length >= codeBlockFence.length && afterFence.all { it.isWhitespace() }) {
                 blocks.add(current.toString().trimEnd())
                 current.clear()
                 inCodeBlock = false
@@ -602,25 +605,31 @@ private fun applyHeadingAutoSpace(value: TextFieldValue): TextFieldValue {
     val text = value.text
     val sel = value.selection
 
-    // Find if any line starts with #{1,6} followed by non-space, non-newline
+    // Process ALL lines that start with #{1,6} followed by non-space, non-newline
     val pattern = Regex("^(#{1,6})([^ \\t\\n])", RegexOption.MULTILINE)
-    val match = pattern.find(text) ?: return value
+    val matches = pattern.findAll(text).toList()
+    if (matches.isEmpty()) return value
 
-    val hashes = match.groupValues[1]
-    val afterChar = match.groupValues[2]
-    val matchStart = match.range.first
+    // Count how many spaces are inserted before the cursor position to adjust selection
+    var cursorAdjust = 0
+    var newText = text
 
-    // Insert space after # markers
-    val before = text.substring(0, matchStart)
-    val after = text.substring(matchStart + match.value.length)
-    val newText = before + hashes + " " + afterChar + after
+    // Process matches in reverse order to preserve positions
+    for (match in matches.reversed()) {
+        val hashes = match.groupValues[1]
+        val afterChar = match.groupValues[2]
+        val matchStart = match.range.first
 
-    // Adjust cursor: if cursor is after the insertion point, shift by +1
-    val spaceInsertPos = matchStart + hashes.length
-    val newSel = TextRange(
-        if (sel.start > spaceInsertPos) sel.start + 1 else sel.start,
-        if (sel.end > spaceInsertPos) sel.end + 1 else sel.end
+        val before = newText.substring(0, matchStart)
+        val after = newText.substring(matchStart + match.value.length)
+        newText = before + hashes + " " + afterChar + after
+
+        val spaceInsertPos = matchStart + hashes.length
+        if (sel.start > spaceInsertPos) cursorAdjust += 1
+    }
+
+    return TextFieldValue(
+        newText,
+        selection = TextRange(sel.start + cursorAdjust, sel.end + cursorAdjust)
     )
-
-    return TextFieldValue(newText, selection = newSel)
 }
