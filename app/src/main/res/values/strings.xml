@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">易Mark</string>
+    <string name="all_notes">所有笔记</string>
+    <string name="inbox">收集箱</string>
+    <string name="tags">标签</string>
+    <string name="search">搜索</string>
+    <string name="settings">设置</string>
+    <string name="new_note">新建笔记</string>
+    <string name="edit_note">编辑笔记</string>
+    <string name="save">保存</string>
+    <string name="hint_write">你要写点什么？</string>
+    <string name="just_now">片刻之前</string>
+</resources>
